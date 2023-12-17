@@ -100,6 +100,7 @@ void SetupImGuiStyle()
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 Present oPresent;
+ResizeBuffers oResizeBuffers;
 HWND window = NULL;
 WNDPROC oWndProc;
 ID3D11Device* pDevice = NULL;
@@ -221,6 +222,7 @@ void rdr::init() {
 		if (rdr::initdx()) {
 			ihook = true;
 			MH_CreateHook((void*)g_methodsTable[8], hkPresent, (void**)&oPresent);
+			MH_CreateHook((void*)g_methodsTable[13], hkResizeBuffers, (void**)&oResizeBuffers);
 			MH_EnableHook(MH_ALL_HOOKS);
 		}
 	} while (!ihook);
@@ -287,6 +289,34 @@ HRESULT __stdcall rdr::hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 	pContext->OMSetRenderTargets(1, &mainRenderTargetView, NULL);
 	ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 	return oPresent(pSwapChain, SyncInterval, Flags);
+}
+
+HRESULT rdr::hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
+{
+	if (mainRenderTargetView) {
+		pContext->OMSetRenderTargets(0, 0, 0);
+		mainRenderTargetView->Release();
+	}
+
+	HRESULT hr = oResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+
+	ID3D11Texture2D* pBuffer;
+	pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBuffer);
+
+	pDevice->CreateRenderTargetView(pBuffer, NULL, &mainRenderTargetView);
+	pBuffer->Release();
+
+	pContext->OMSetRenderTargets(1, &mainRenderTargetView, NULL);
+
+	D3D11_VIEWPORT vp;
+	vp.Width = Width;
+	vp.Height = Height;
+	vp.MinDepth = 0.0f;
+	vp.MaxDepth = 1.0f;
+	vp.TopLeftX = 0;
+	vp.TopLeftY = 0;
+	pContext->RSSetViewports(1, &vp);
+	return hr;
 }
 
 void rdr::term() {
